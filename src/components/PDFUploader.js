@@ -1,8 +1,5 @@
 import React, { useState, useRef } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-
-// ====== CRITICAL: Set worker to CDN ======
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+import pdfParse from "pdf-parse";
 
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -18,34 +15,22 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
     setProgress(10);
 
     try {
-      // Read file as ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       setProgress(30);
 
-      // Load PDF using pdfjs
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const totalPages = pdf.numPages;
-      setProgress(50);
+      const data = await pdfParse(arrayBuffer);
+      setProgress(80);
 
-      let fullText = "";
+      const extractedText = data.text;
 
-      for (let i = 1; i <= totalPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item) => item.str).join(" ");
-        fullText += pageText + "\n\n";
-        console.log(`📄 Page ${i}: ${pageText.length} chars`);
-        setProgress(50 + (i / totalPages) * 40);
-      }
-
-      if (!fullText || fullText.trim().length < 20) {
+      if (!extractedText || extractedText.trim().length < 20) {
         throw new Error("No text could be extracted from this PDF.");
       }
 
       setProgress(100);
-      console.log("✅ Extracted:", fullText.length, "chars");
+      console.log("✅ Text extracted:", extractedText.length, "characters");
 
-      onTextExtracted(fullText);
+      onTextExtracted(extractedText);
       onFileUpload(file);
     } catch (err) {
       console.error("❌ Error:", err);
