@@ -1,162 +1,184 @@
-import React, { useState, useRef } from "react";
+// src/components/FileUploader.jsx (Updated)
+import React, { useState, useCallback } from "react";
+import { useDropzone } from "react-dropzone";
+import mammoth from "mammoth";
+import pdfParse from "pdf-parse";
 
-// ====== FIX: Use require for pdf-parse ======
-const pdfParse = require("pdf-parse");
-
-const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
-  const [isLoading, setIsLoading] = useState(false);
+const FileUploader = ({ onFileUpload, onTextExtracted }) => {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
-  const fileInputRef = useRef(null);
 
-  const extractTextFromPDF = async (file) => {
-    setIsLoading(true);
-    setError(null);
-    setFileName(file.name);
-    setProgress(10);
+  const extractText = useCallback(
+    async (file) => {
+      try {
+        setLoading(true);
+        setError(null);
+        setProgress(10);
 
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      setProgress(30);
+        const fileType = file.name.split(".").pop().toLowerCase();
+        let text = "";
 
-      const data = await pdfParse(arrayBuffer);
-      setProgress(80);
+        // Handle different file types
+        if (fileType === "txt") {
+          // TXT files
+          const content = await file.text();
+          text = content;
+          setProgress(100);
+        } else if (fileType === "pdf") {
+          // PDF files
+          const arrayBuffer = await file.arrayBuffer();
+          setProgress(40);
+          const data = await pdfParse(arrayBuffer);
+          text = data.text;
+          setProgress(100);
+        } else if (fileType === "docx") {
+          // DOCX files
+          const arrayBuffer = await file.arrayBuffer();
+          setProgress(40);
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          text = result.value;
+          setProgress(100);
+        } else if (fileType === "doc") {
+          // DOC files - less reliable but try
+          const content = await file.text();
+          text = content;
+          setProgress(100);
+        } else if (fileType === "epub" || fileType === "mobi") {
+          // For these, use a simple read
+          const content = await file.text();
+          text = content;
+          setProgress(100);
+        } else {
+          throw new Error(`Unsupported file type: ${fileType}`);
+        }
 
-      const extractedText = data.text;
+        // Clean up the text
+        text = text.replace(/\s+/g, " ").trim();
 
-      if (!extractedText || extractedText.trim().length < 20) {
-        throw new Error("No text could be extracted from this PDF.");
+        if (!text || text.length < 10) {
+          throw new Error("No text could be extracted from this file");
+        }
+
+        // Success!
+        if (onFileUpload) onFileUpload(file);
+        if (onTextExtracted) onTextExtracted(text);
+
+        setLoading(false);
+        return text;
+      } catch (err) {
+        console.error("Extraction error:", err);
+        setError(`Could not extract text: ${err.message}`);
+        setLoading(false);
+        setProgress(0);
+        if (onTextExtracted) onTextExtracted("");
       }
+    },
+    [onFileUpload, onTextExtracted],
+  );
 
-      setProgress(100);
-      console.log("✅ Text extracted:", extractedText.length, "characters");
+  const onDrop = useCallback(
+    async (acceptedFiles) => {
+      const uploadedFile = acceptedFiles[0];
+      if (!uploadedFile) return;
 
-      onTextExtracted(extractedText);
-      onFileUpload(file);
-    } catch (err) {
-      console.error("❌ Error:", err);
-      setError("Failed to extract text: " + err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      setFile(uploadedFile);
+      setError(null);
+      await extractText(uploadedFile);
+    },
+    [extractText],
+  );
 
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf")
-    ) {
-      extractTextFromPDF(file);
-    } else {
-      setError("Please upload a valid PDF file");
-    }
-  };
-
-  const handleDrop = (event) => {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
-
-    if (
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf")
-    ) {
-      extractTextFromPDF(file);
-    } else {
-      setError("Please upload a valid PDF file");
-    }
-  };
-
-  const handleDragOver = (event) => {
-    event.preventDefault();
-  };
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "text/plain": [".txt"],
+      "application/pdf": [".pdf"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        [".docx"],
+      "application/msword": [".doc"],
+      "application/epub+zip": [".epub"],
+    },
+    maxFiles: 1,
+    disabled: loading,
+    maxSize: 50 * 1024 * 1024, // 50MB
+  });
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-4">
-      <h3 className="font-semibold text-gray-700 mb-3">📄 Upload PDF</h3>
-
-      {error && (
-        <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded mb-4">
-          <strong>Error:</strong> {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-2 text-sm underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="mb-4">
-          <div className="flex justify-between text-sm text-gray-500 mb-1">
-            <span>Extracting text...</span>
-            <span>{progress}%</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2.5">
-            <div
-              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            ></div>
-          </div>
-        </div>
-      )}
+    <div className="bg-white rounded-lg shadow-md p-6">
+      <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        📄 Upload Your File
+      </h2>
 
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-          isLoading
-            ? "bg-gray-100 border-gray-400"
-            : "border-gray-300 hover:border-blue-500"
-        }`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onClick={() => fileInputRef.current?.click()}
+        {...getRootProps()}
+        className={`
+                    border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+                    transition-all duration-200
+                    ${loading ? "opacity-50 cursor-default" : "hover:bg-gray-50"}
+                    ${error ? "border-red-400 bg-red-50" : ""}
+                    ${isDragActive ? "border-blue-500 bg-blue-50" : "border-gray-300"}
+                `}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,application/pdf"
-          onChange={handleFileChange}
-          className="hidden"
-        />
+        <input {...getInputProps()} />
 
-        {isLoading ? (
-          <div className="py-4">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
-            <p className="mt-2 text-gray-500">Extracting text...</p>
+        {loading ? (
+          <div>
+            <div className="text-4xl mb-3">⏳</div>
+            <p className="text-gray-600 font-medium">Extracting text...</p>
+            <div className="w-full max-w-xs mx-auto mt-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-sm text-gray-500 mt-2">
+              {Math.round(progress)}%
+            </p>
+          </div>
+        ) : error ? (
+          <div>
+            <div className="text-4xl mb-3">⚠️</div>
+            <p className="text-red-600 font-medium mb-2">{error}</p>
+            <p className="text-sm text-gray-500">Click or drag to try again</p>
           </div>
         ) : (
-          <>
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-              />
-            </svg>
-            <p className="text-gray-600">
-              Drag & drop your PDF here, or click to browse
+          <div>
+            <div className="text-5xl mb-3">📄</div>
+            <p className="text-gray-600 font-medium">
+              {isDragActive
+                ? "Drop your file here"
+                : "Drag & drop your file here"}
             </p>
-            <p className="text-sm text-gray-400">Extracts text from PDFs</p>
-          </>
+            <p className="text-sm text-gray-400 mt-1">or click to browse</p>
+            <div className="mt-3 text-sm text-gray-500">
+              <span className="inline-block bg-gray-100 px-2 py-1 rounded mr-1">
+                PDF
+              </span>
+              <span className="inline-block bg-gray-100 px-2 py-1 rounded mr-1">
+                TXT
+              </span>
+              <span className="inline-block bg-gray-100 px-2 py-1 rounded mr-1">
+                DOCX
+              </span>
+              <span className="inline-block bg-gray-100 px-2 py-1 rounded">
+                EPUB
+              </span>
+            </div>
+            {file && !error && (
+              <div className="mt-3 text-green-600">
+                <p className="font-medium">✓ {file.name}</p>
+                <p className="text-xs text-gray-500">
+                  {(file.size / 1024).toFixed(0)} KB
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {fileName && !isLoading && (
-        <div className="mt-2 text-sm text-green-600">✅ {fileName}</div>
-      )}
     </div>
   );
 };
 
-export default PDFUploader;
+export default FileUploader;

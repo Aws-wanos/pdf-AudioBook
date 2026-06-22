@@ -1,11 +1,12 @@
+// src/App.js
 import React, { useState, useCallback } from "react";
-import PDFUploader from "./components/PDFUploader";
+import FileUploader from "./components/FileUploader"; // Changed from PDFUploader
 import PageRangeSelector from "./components/PageRangeSelector";
 import AudioPlayer from "./components/AudioPlayer";
 import LanguageTeacher from "./components/LanguageTeacher";
 
 function App() {
-  const [pdfFile, setPdfFile] = useState(null);
+  const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
   const [selectedText, setSelectedText] = useState("");
   const [totalPages, setTotalPages] = useState(0);
@@ -13,23 +14,28 @@ function App() {
   const [activeTab, setActiveTab] = useState("home");
 
   const handleFileUpload = useCallback((file) => {
-    setPdfFile(file);
+    setFile(file);
   }, []);
 
   const handleTextExtracted = useCallback((text) => {
     setExtractedText(text);
-    const estimatedPages = Math.ceil(text.length / 2000);
+    // Estimate pages based on text length
+    const estimatedPages = Math.max(1, Math.ceil(text.length / 2000));
     setTotalPages(estimatedPages);
+
+    // Split text into pages
     const pageTextsMap = {};
-    const lines = text.split("\n");
-    const linesPerPage = Math.ceil(lines.length / estimatedPages);
+    const words = text.split(/\s+/);
+    const wordsPerPage = Math.ceil(words.length / estimatedPages);
+
     for (let i = 0; i < estimatedPages; i++) {
-      const start = i * linesPerPage;
-      const end = Math.min((i + 1) * linesPerPage, lines.length);
-      pageTextsMap[i + 1] = lines.slice(start, end).join("\n");
+      const start = i * wordsPerPage;
+      const end = Math.min((i + 1) * wordsPerPage, words.length);
+      pageTextsMap[i + 1] = words.slice(start, end).join(" ");
     }
     setPageTexts(pageTextsMap);
-    console.log(`📄 Extracted ${text.length} chars, ~${estimatedPages} pages`);
+
+    console.log(`✅ Extracted ${text.length} chars, ~${estimatedPages} pages`);
   }, []);
 
   const handleRangeSelect = useCallback((text, startPage, endPage) => {
@@ -43,43 +49,18 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 shadow-lg">
         <div className="container mx-auto max-w-6xl">
-          <h1 className="text-3xl font-bold">📚 PDF Audiobook Converter</h1>
+          <h1 className="text-3xl font-bold">🎧 PDF to Audiobook</h1>
           <p className="text-sm opacity-90">
-            Upload a PDF, then listen or learn
+            Upload any file (PDF, TXT, DOCX, EPUB) and listen
           </p>
         </div>
       </header>
 
       <main className="container mx-auto p-4 max-w-6xl">
-        {/* ====== INFO NOTE ====== */}
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-6">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">💡</span>
-            <div>
-              <p className="text-sm font-medium text-gray-800">
-                For scanned PDFs, use the{" "}
-                <a
-                  href="http://89.125.77.85/ocr"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-purple-600 font-bold underline"
-                >
-                  OCR Converter
-                </a>{" "}
-                first!
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Upload your scanned PDF to the OCR Converter, download the text
-                PDF, then upload it here.
-              </p>
-            </div>
-          </div>
-        </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* LEFT COLUMN - Upload */}
           <div className="space-y-4">
-            <PDFUploader
+            <FileUploader
               onFileUpload={handleFileUpload}
               onTextExtracted={handleTextExtracted}
             />
@@ -96,7 +77,6 @@ function App() {
           <div className="space-y-4">
             {extractedText ? (
               <>
-                {/* Main Page Buttons */}
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setActiveTab("listen")}
@@ -128,12 +108,11 @@ function App() {
                       Language Teacher
                     </span>
                     <p className="text-xs text-gray-500 mt-1">
-                      AI-powered lessons & quizzes
+                      AI-powered lessons
                     </p>
                   </button>
                 </div>
 
-                {/* Feature Content */}
                 {activeTab === "listen" && (
                   <>
                     <PageRangeSelector
@@ -153,10 +132,10 @@ function App() {
             ) : (
               <div className="bg-white rounded-lg shadow-md p-8 text-center">
                 <p className="text-gray-400 text-lg">
-                  📖 Upload a book to get started
+                  📖 Upload a file to get started
                 </p>
                 <p className="text-sm text-gray-400 mt-2">
-                  Then choose Listen or Language Teacher
+                  Supports PDF, TXT, DOCX, EPUB
                 </p>
               </div>
             )}
