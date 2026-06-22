@@ -1,8 +1,7 @@
 import React, { useState, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import Tesseract from "tesseract.js";
 
-// ====== FIX: Use CDN worker ======
+// ====== PDF.js Worker ======
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
@@ -11,25 +10,45 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
   const [ocrMode, setOcrMode] = useState(false);
+  const [tesseractReady, setTesseractReady] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Extract text from a single page (direct or OCR)
+  // ====== LOAD TESSERACT FROM CDN ======
+  const loadTesseract = () => {
+    return new Promise((resolve) => {
+      if (window.Tesseract) {
+        resolve(window.Tesseract);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src =
+        "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      script.onload = () => {
+        resolve(window.Tesseract);
+      };
+      script.onerror = () => {
+        // Fallback to import
+        import("tesseract.js").then((module) => {
+          resolve(module.default || module);
+        });
+      };
+      document.head.appendChild(script);
+    });
+  };
+
   const extractPageText = async (page, pageNum, totalPages) => {
     try {
-      // Try to get text directly first
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map((item) => item.str).join(" ");
 
-      // If there's substantial text, use it directly
       if (pageText.trim().length > 50) {
         console.log(
-          `📄 Page ${pageNum}: Direct text extraction (${pageText.length} chars)`,
+          `📄 Page ${pageNum}: Direct text (${pageText.length} chars)`,
         );
         return pageText;
       }
 
-      // If no text, use OCR (image-based)
-      console.log(`🖼️ Page ${pageNum}: No text found, running OCR...`);
+      console.log(`🖼️ Page ${pageNum}: Running OCR...`);
       setOcrMode(true);
 
       const viewport = page.getViewport({ scale: 1.5 });
@@ -39,10 +58,12 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       canvas.height = viewport.height;
 
       await page.render({ canvasContext: context, viewport }).promise;
-
       const imageData = canvas.toDataURL("image/png");
 
-      // Run OCR with Tesseract
+      // ====== GET TESSERACT ======
+      const Tesseract = await loadTesseract();
+      setTesseractReady(true);
+
       const result = await Tesseract.recognize(
         imageData,
         "eng+rus+deu+spa+fra",
@@ -63,7 +84,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       return result.data.text;
     } catch (err) {
       console.warn(`⚠️ Page ${pageNum} failed:`, err.message);
-      return ""; // Return empty string if page fails
+      return "";
     }
   };
 
@@ -92,20 +113,18 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       }
 
       if (!fullText || fullText.trim().length < 20) {
-        throw new Error(
-          "No text could be extracted from the PDF. The file may be corrupted or empty.",
-        );
+        throw new Error("No text could be extracted from this PDF.");
       }
 
       setProgress(100);
       console.log(
-        `✅ Text extracted: ${fullText.length} characters (${totalPages} pages)`,
+        `✅ Extracted ${fullText.length} chars (${totalPages} pages)`,
       );
 
       onTextExtracted(fullText);
       onFileUpload(file);
     } catch (err) {
-      console.error("❌ Error extracting text:", err);
+      console.error("❌ Error:", err);
       setError("Failed to extract text: " + err.message);
     } finally {
       setIsLoading(false);
@@ -179,7 +198,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           </div>
           {ocrMode && (
             <p className="text-xs text-yellow-500 mt-1">
-              ⚠️ OCR mode active - processing image pages (slower)
+              ⚠️ OCR mode - processing images
             </p>
           )}
         </div>
@@ -236,9 +255,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       </div>
 
       {fileName && !isLoading && (
-        <div className="mt-2 text-sm text-green-600">
-          ✅ File processed: {fileName}
-        </div>
+        <div className="mt-2 text-sm text-green-600">✅ {fileName}</div>
       )}
     </div>
   );
