@@ -4,41 +4,68 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
+  const [progress, setProgress] = useState(0);
   const fileInputRef = useRef(null);
 
   const extractTextFromPDF = (file) => {
     setIsLoading(true);
     setError(null);
     setFileName(file.name);
+    setProgress(10);
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const text = e.target.result;
-        // Clean the text and extract readable content
-        const cleanText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
-        const matches = cleanText.match(/\(([^)]*)\)/g);
-        let extractedText = matches
-          ? matches.map((m) => m.slice(1, -1)).join(" ")
-          : "";
 
-        if (!extractedText || extractedText.length < 20) {
-          const readable = cleanText.match(/[A-Za-z]{4,}/g);
-          if (readable) extractedText = readable.join(" ");
+        // ====== METHOD 1: Extract from PDF text operators ======
+        // PDFs store text as (text) Tj or (text) TJ operators
+        const matches = text.match(/\(([^)]*)\)/g);
+        let extractedText = "";
+
+        if (matches) {
+          extractedText = matches.map((m) => m.slice(1, -1)).join(" ");
+          // Clean up
+          extractedText = extractedText.replace(/\s+/g, " ").trim();
         }
 
+        // ====== METHOD 2: If no text found, try readable text ======
+        if (!extractedText || extractedText.length < 20) {
+          // Remove binary garbage
+          const cleanText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+          const readable = cleanText.match(/[A-Za-z]{4,}/g);
+          if (readable) {
+            extractedText = readable.join(" ");
+          }
+        }
+
+        // ====== METHOD 3: Try to decode as UTF-8 ======
+        if (!extractedText || extractedText.length < 20) {
+          const decoder = new TextDecoder("utf-8");
+          const decoded = decoder.decode(new Uint8Array(text.length));
+          const words = decoded.match(/[A-Za-z]{4,}/g);
+          if (words) {
+            extractedText = words.join(" ");
+          }
+        }
+
+        setProgress(80);
+
         if (extractedText && extractedText.length > 20) {
+          console.log("✅ Text extracted:", extractedText.length, "characters");
           onTextExtracted(extractedText);
           onFileUpload(file);
         } else {
           setError(
-            "Could not extract text. For scanned PDFs, use the OCR Converter first.",
+            "Could not extract text from this PDF. Try using the OCR Converter at /ocr",
           );
         }
       } catch (err) {
+        console.error("❌ Error:", err);
         setError("Failed to extract text: " + err.message);
       } finally {
         setIsLoading(false);
+        setProgress(100);
       }
     };
     reader.onerror = () => {
@@ -50,20 +77,30 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
-    if (file && file.type === "application/pdf") {
+    if (!file) return;
+
+    if (
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+    ) {
       extractTextFromPDF(file);
     } else {
-      setError("Please upload a PDF file");
+      setError("Please upload a valid PDF file");
     }
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file && file.type === "application/pdf") {
+    if (!file) return;
+
+    if (
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+    ) {
       extractTextFromPDF(file);
     } else {
-      setError("Please upload a PDF file");
+      setError("Please upload a valid PDF file");
     }
   };
 
@@ -91,9 +128,13 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
         <div className="mb-4">
           <div className="flex justify-between text-sm text-gray-500 mb-1">
             <span>Extracting text...</span>
+            <span>{progress}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2.5">
-            <div className="bg-blue-600 h-2.5 rounded-full animate-pulse"></div>
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            ></div>
           </div>
         </div>
       )}
@@ -140,7 +181,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
               Drag & drop your PDF here, or click to browse
             </p>
             <p className="text-sm text-gray-400">
-              For scanned PDFs, use the OCR Converter
+              Extracts text from text-based PDFs
             </p>
           </>
         )}

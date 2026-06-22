@@ -1,7 +1,10 @@
 import axios from "axios";
 
+// ====== USE CORS PROXY FOR GROQ ======
 const GROQ_API_KEY = process.env.REACT_APP_GROQ_API_KEY || "";
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_URL =
+  "https://corsproxy.io/?" +
+  encodeURIComponent("https://api.groq.com/openai/v1/chat/completions");
 
 const MAX_TEXT_LENGTH = 3000;
 const MODEL = "llama-3.1-8b-instant";
@@ -37,7 +40,9 @@ Format:
 ONLY JSON. No other text.`;
 
   try {
-    console.log(`🔄 Sending request to Groq (attempt ${retryCount + 1})...`);
+    console.log(
+      `🔄 Sending request to Groq via CORS proxy (attempt ${retryCount + 1})...`,
+    );
 
     const response = await axios.post(
       GROQ_URL,
@@ -46,7 +51,8 @@ ONLY JSON. No other text.`;
         messages: [
           {
             role: "system",
-            content: "You are a JSON generator. Output ONLY valid JSON. Never output any other text.",
+            content:
+              "You are a JSON generator. Output ONLY valid JSON. Never output any other text.",
           },
           { role: "user", content: prompt },
         ],
@@ -59,7 +65,7 @@ ONLY JSON. No other text.`;
           "Content-Type": "application/json",
         },
         timeout: 60000,
-      }
+      },
     );
 
     const content = response.data.choices[0].message.content;
@@ -81,24 +87,36 @@ ONLY JSON. No other text.`;
     const result = JSON.parse(jsonString);
 
     if (!result.units || result.units.length === 0) {
-      result.units = [{
-        id: 1,
-        title: "Course Content",
-        description: "Content from the text",
-        lessons: [{
+      result.units = [
+        {
           id: 1,
-          title: "Main Lesson",
-          content: textToSend.substring(0, 500),
-          vocabulary: [],
-        }],
-        quiz: {
-          questions: [{ question: "What did you learn?", options: ["A", "B", "C", "D"], answer: 0 }]
-        }
-      }];
+          title: "Course Content",
+          description: "Content from the text",
+          lessons: [
+            {
+              id: 1,
+              title: "Main Lesson",
+              content: textToSend.substring(0, 500),
+              vocabulary: [],
+            },
+          ],
+          quiz: {
+            questions: [
+              {
+                question: "What did you learn?",
+                options: ["A", "B", "C", "D"],
+                answer: 0,
+              },
+            ],
+          },
+        },
+      ];
     }
 
     return result;
   } catch (error) {
+    console.error("❌ Groq Error:", error);
+
     if (error.response?.status === 429 && retryCount < 3) {
       const waitTime = (retryCount + 1) * 8000;
       await new Promise((resolve) => setTimeout(resolve, waitTime));
@@ -107,20 +125,30 @@ ONLY JSON. No other text.`;
 
     return {
       courseTitle: `${language} Course`,
-      units: [{
-        id: 1,
-        title: "Content from Text",
-        description: textToSend.substring(0, 200),
-        lessons: [{
+      units: [
+        {
           id: 1,
-          title: "Main Lesson",
-          content: textToSend.substring(0, 800),
-          vocabulary: [],
-        }],
-        quiz: {
-          questions: [{ question: "What is the main topic?", options: ["A", "B", "C", "D"], answer: 0 }]
-        }
-      }]
+          title: "Content from Text",
+          description: textToSend.substring(0, 200),
+          lessons: [
+            {
+              id: 1,
+              title: "Main Lesson",
+              content: textToSend.substring(0, 800),
+              vocabulary: [],
+            },
+          ],
+          quiz: {
+            questions: [
+              {
+                question: "What is the main topic?",
+                options: ["A", "B", "C", "D"],
+                answer: 0,
+              },
+            ],
+          },
+        },
+      ],
     };
   }
 };
