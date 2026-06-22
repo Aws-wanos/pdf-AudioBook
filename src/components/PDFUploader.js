@@ -1,5 +1,7 @@
 import React, { useState, useRef } from "react";
-import pdfParse from "pdf-parse";
+
+// ====== FIX: Use require for pdf-parse ======
+const pdfParse = require("pdf-parse");
 
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
@@ -15,18 +17,16 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
     setProgress(10);
 
     try {
-      // Read as ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       setProgress(30);
 
-      // Extract text using pdf-parse
       const data = await pdfParse(arrayBuffer);
       setProgress(80);
 
       const extractedText = data.text;
 
       if (!extractedText || extractedText.trim().length < 20) {
-        throw new Error("No text could be extracted.");
+        throw new Error("No text could be extracted from this PDF.");
       }
 
       setProgress(100);
@@ -147,9 +147,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
             <p className="text-gray-600">
               Drag & drop your PDF here, or click to browse
             </p>
-            <p className="text-sm text-gray-400">
-              Extracts text from text-based PDFs
-            </p>
+            <p className="text-sm text-gray-400">Extracts text from PDFs</p>
           </>
         )}
       </div>
