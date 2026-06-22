@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+import Tesseract from "tesseract.js";
 
 // ====== PDF.js Worker ======
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
@@ -9,107 +10,78 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
-  const [ocrMode, setOcrMode] = useState(false);
-  const [tesseractReady, setTesseractReady] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const fileInputRef = useRef(null);
-
-  // ====== LOAD TESSERACT FROM CDN ======
-  const loadTesseract = () => {
-    return new Promise((resolve) => {
-      if (window.Tesseract) {
-        resolve(window.Tesseract);
-        return;
-      }
-      const script = document.createElement("script");
-      script.src =
-        "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-      script.onload = () => {
-        resolve(window.Tesseract);
-      };
-      script.onerror = () => {
-        // Fallback to import
-        import("tesseract.js").then((module) => {
-          resolve(module.default || module);
-        });
-      };
-      document.head.appendChild(script);
-    });
-  };
-
-  const extractPageText = async (page, pageNum, totalPages) => {
-    try {
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map((item) => item.str).join(" ");
-
-      if (pageText.trim().length > 50) {
-        console.log(
-          `📄 Page ${pageNum}: Direct text (${pageText.length} chars)`,
-        );
-        return pageText;
-      }
-
-      console.log(`🖼️ Page ${pageNum}: Running OCR...`);
-      setOcrMode(true);
-
-      const viewport = page.getViewport({ scale: 1.5 });
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      await page.render({ canvasContext: context, viewport }).promise;
-      const imageData = canvas.toDataURL("image/png");
-
-      // ====== GET TESSERACT ======
-      const Tesseract = await loadTesseract();
-      setTesseractReady(true);
-
-      const result = await Tesseract.recognize(
-        imageData,
-        "eng+rus+deu+spa+fra",
-        {
-          logger: (m) => {
-            if (m.status === "recognizing text") {
-              const pageProgress = ((pageNum - 1) / totalPages) * 100;
-              const chunkProgress = (m.progress * 100) / totalPages;
-              setProgress(Math.round(pageProgress + chunkProgress));
-            }
-          },
-        },
-      );
-
-      console.log(
-        `✅ Page ${pageNum}: OCR completed (${result.data.text.length} chars)`,
-      );
-      return result.data.text;
-    } catch (err) {
-      console.warn(`⚠️ Page ${pageNum} failed:`, err.message);
-      return "";
-    }
-  };
 
   const extractTextFromPDF = async (file) => {
     setIsLoading(true);
     setError(null);
     setFileName(file.name);
-    setProgress(10);
-    setOcrMode(false);
+    setProgress(0);
+    setCurrentPage(0);
+    setTotalPages(0);
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      setProgress(20);
+      setProgress(5);
 
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const totalPages = pdf.numPages;
-      setProgress(30);
+      setTotalPages(totalPages);
+      setProgress(10);
 
       let fullText = "";
+      let ocrCount = 0;
 
       for (let i = 1; i <= totalPages; i++) {
+        setCurrentPage(i);
         const page = await pdf.getPage(i);
-        const pageText = await extractPageText(page, i, totalPages);
-        fullText += pageText + "\n\n";
-        setProgress(30 + (i / totalPages) * 60);
+
+        // ====== TRY DIRECT TEXT FIRST ======
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item) => item.str).join(" ");
+
+        if (pageText.trim().length > 50) {
+          fullText += `--- Page ${i} ---\n${pageText}\n\n`;
+          console.log(`📄 Page ${i}: Direct text (${pageText.length} chars)`);
+        } else {
+          // ====== OCR FOR IMAGES ======
+          console.log(`🖼️ Page ${i}: Running OCR...`);
+          ocrCount++;
+
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+
+          await page.render({ canvasContext: context, viewport }).promise;
+          const imageData = canvas.toDataURL("image/png");
+
+          // ====== TESSERACT OCR WITH PROPER CONFIG ======
+          const result = await Tesseract.recognize(imageData, "eng", {
+            logger: (m) => {
+              if (m.status === "recognizing text") {
+                const pageProgress = ((i - 1) / totalPages) * 100;
+                const chunkProgress = (m.progress * 100) / totalPages;
+                setProgress(Math.round(10 + pageProgress + chunkProgress));
+              }
+            },
+            // ====== DISABLE SOME FEATURES FOR SPEED ======
+            disable: true,
+            // ====== USE ONLY ENGLISH FOR SPEED ======
+            lang: "eng",
+          });
+
+          const ocrText = result.data.text || "";
+          if (ocrText.trim().length > 10) {
+            fullText += `--- Page ${i} (OCR) ---\n${ocrText}\n\n`;
+          }
+          console.log(`✅ Page ${i}: OCR completed (${ocrText.length} chars)`);
+        }
+
+        setProgress(10 + (i / totalPages) * 85);
       }
 
       if (!fullText || fullText.trim().length < 20) {
@@ -118,7 +90,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
 
       setProgress(100);
       console.log(
-        `✅ Extracted ${fullText.length} chars (${totalPages} pages)`,
+        `✅ Extracted ${fullText.length} chars (${ocrCount} OCR pages)`,
       );
 
       onTextExtracted(fullText);
@@ -128,8 +100,6 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       setError("Failed to extract text: " + err.message);
     } finally {
       setIsLoading(false);
-      setProgress(100);
-      setOcrMode(false);
     }
   };
 
@@ -186,9 +156,11 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
         <div className="mb-4">
           <div className="flex justify-between text-sm text-gray-500 mb-1">
             <span>
-              {ocrMode ? "🔍 Running OCR..." : "📄 Extracting text..."}
+              {ocrCount > 0
+                ? `🔍 OCR Page ${currentPage}/${totalPages}`
+                : `📄 Extracting page ${currentPage}/${totalPages}`}
             </span>
-            <span>{progress}%</span>
+            <span>{Math.round(progress)}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2.5">
             <div
@@ -196,11 +168,6 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
               style={{ width: `${progress}%` }}
             ></div>
           </div>
-          {ocrMode && (
-            <p className="text-xs text-yellow-500 mt-1">
-              ⚠️ OCR mode - processing images
-            </p>
-          )}
         </div>
       )}
 
@@ -226,7 +193,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           <div className="py-4">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
             <p className="mt-2 text-gray-500">
-              {ocrMode ? "Running OCR..." : "Extracting text..."}
+              {ocrCount > 0 ? "Running OCR..." : "Extracting text..."}
             </p>
           </div>
         ) : (
