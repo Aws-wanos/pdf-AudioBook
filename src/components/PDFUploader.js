@@ -1,69 +1,107 @@
-import React, { useState } from "react";
-import { uploadPDF, checkStatus } from "../services/api";
+import React, { useState, useRef } from "react";
+import * as pdfjsLib from "pdfjs-dist";
 
-const PDFUploader = ({ onTextExtracted, onAudioReady }) => {
-  const [file, setFile] = useState(null);
+// ====== PDF.js Worker ======
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+
+const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [taskId, setTaskId] = useState(null);
-  const [status, setStatus] = useState("");
+  const [fileName, setFileName] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
+  const fileInputRef = useRef(null);
 
-  const handleFileChange = (e) => {
-    const selected = e.target.files[0];
-    if (selected && selected.type === "application/pdf") {
-      setFile(selected);
-      setError(null);
+  const extractTextFromPDF = async (file) => {
+    setIsLoading(true);
+    setError(null);
+    setFileName(file.name);
+    setProgress(0);
+    setCurrentPage(0);
+    setTotalPages(0);
+
+    try {
+      // ====== READ AS ARRAYBUFFER (NOT TEXT!) ======
+      const arrayBuffer = await file.arrayBuffer();
+      setProgress(10);
+
+      // ====== LOAD PDF ======
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const totalPages = pdf.numPages;
+      setTotalPages(totalPages);
+      setProgress(20);
+
+      let fullText = "";
+
+      for (let i = 1; i <= totalPages; i++) {
+        setCurrentPage(i);
+        const page = await pdf.getPage(i);
+
+        // ====== EXTRACT TEXT ======
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item) => item.str).join(" ");
+
+        if (pageText.trim().length > 0) {
+          fullText += `--- Page ${i} ---\n${pageText}\n\n`;
+        }
+
+        setProgress(20 + (i / totalPages) * 70);
+        console.log(`📄 Page ${i}: ${pageText.length} chars`);
+      }
+
+      if (!fullText || fullText.trim().length < 20) {
+        throw new Error(
+          "No text could be extracted. This may be a scanned PDF. Use the OCR Converter.",
+        );
+      }
+
+      setProgress(100);
+      console.log(
+        `✅ Extracted ${fullText.length} chars from ${totalPages} pages`,
+      );
+
+      onTextExtracted(fullText);
+      onFileUpload(file);
+    } catch (err) {
+      console.error("❌ Error:", err);
+      setError("Failed to extract text: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+    ) {
+      extractTextFromPDF(file);
     } else {
       setError("Please upload a valid PDF file");
     }
   };
 
-  const handleUpload = async () => {
-    if (!file) {
-      setError("Please select a PDF file");
-      return;
-    }
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
 
-    setIsLoading(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await uploadPDF(formData);
-      setTaskId(response.data.task_id);
-      setStatus("processing");
-
-      // Poll for status
-      pollStatus(response.data.task_id);
-    } catch (err) {
-      setError("Failed to upload PDF: " + err.message);
-      setIsLoading(false);
+    if (
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+    ) {
+      extractTextFromPDF(file);
+    } else {
+      setError("Please upload a valid PDF file");
     }
   };
 
-  const pollStatus = async (id) => {
-    const interval = setInterval(async () => {
-      try {
-        const response = await checkStatus(id);
-        setStatus(response.data.status);
-
-        if (response.data.status === "completed") {
-          clearInterval(interval);
-          setIsLoading(false);
-          if (onAudioReady) onAudioReady(id);
-        } else if (response.data.status === "failed") {
-          clearInterval(interval);
-          setIsLoading(false);
-          setError("Processing failed. Please try again.");
-        }
-      } catch (err) {
-        clearInterval(interval);
-        setIsLoading(false);
-        setError("Failed to check status");
-      }
-    }, 3000);
+  const handleDragOver = (event) => {
+    event.preventDefault();
   };
 
   return (
@@ -82,25 +120,37 @@ const PDFUploader = ({ onTextExtracted, onAudioReady }) => {
         </div>
       )}
 
+      {isLoading && (
+        <div className="mb-4">
+          <div className="flex justify-between text-sm text-gray-500 mb-1">
+            <span>
+              {totalPages > 0
+                ? `📄 Page ${currentPage}/${totalPages}`
+                : "Extracting text..."}
+            </span>
+            <span>{Math.round(progress)}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+        </div>
+      )}
+
       <div
         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
           isLoading
             ? "bg-gray-100 border-gray-400"
             : "border-gray-300 hover:border-blue-500"
         }`}
-        onDrop={(e) => {
-          e.preventDefault();
-          const dropped = e.dataTransfer.files[0];
-          if (dropped) {
-            const event = { target: { files: [dropped] } };
-            handleFileChange(event);
-          }
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onClick={() => document.getElementById("fileInput").click()}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onClick={() => fileInputRef.current?.click()}
       >
         <input
-          id="fileInput"
+          ref={fileInputRef}
           type="file"
           accept=".pdf,application/pdf"
           onChange={handleFileChange}
@@ -110,7 +160,7 @@ const PDFUploader = ({ onTextExtracted, onAudioReady }) => {
         {isLoading ? (
           <div className="py-4">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
-            <p className="mt-2 text-gray-500">Processing... {status}</p>
+            <p className="mt-2 text-gray-500">Extracting text...</p>
           </div>
         ) : (
           <>
@@ -128,22 +178,17 @@ const PDFUploader = ({ onTextExtracted, onAudioReady }) => {
               />
             </svg>
             <p className="text-gray-600">
-              {file
-                ? `📄 ${file.name}`
-                : "Drag & drop your PDF here, or click to browse"}
+              Drag & drop your PDF here, or click to browse
             </p>
-            <p className="text-sm text-gray-400">Supports scanned PDFs (OCR)</p>
+            <p className="text-sm text-gray-400">
+              Extracts text from text-based PDFs
+            </p>
           </>
         )}
       </div>
 
-      {file && !isLoading && (
-        <button
-          onClick={handleUpload}
-          className="mt-4 w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
-        >
-          📤 Upload and Process PDF
-        </button>
+      {fileName && !isLoading && (
+        <div className="mt-2 text-sm text-green-600">✅ {fileName}</div>
       )}
     </div>
   );
