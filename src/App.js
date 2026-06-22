@@ -57,22 +57,20 @@ function App() {
             <span className="text-2xl">💡</span>
             <div>
               <p className="text-sm font-medium text-gray-800">
-                Want to learn a language?
-                <span className="text-purple-600 font-bold">
-                  {" "}
-                  Upload a language book
-                </span>{" "}
-                and click
-                <span className="text-purple-600 font-bold">
-                  {" "}
-                  "Language Teacher"
-                </span>
-                !
+                For scanned PDFs, use the{" "}
+                <a
+                  href="http://89.125.77.85/ocr"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-purple-600 font-bold underline"
+                >
+                  OCR Converter
+                </a>{" "}
+                first!
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                The AI will create structured lessons, vocabulary lists, grammar
-                explanations, and quizzes from your book. Process 5,000
-                characters at a time (one chunk per minute due to API limits).
+                Upload your scanned PDF to the OCR Converter, download the text
+                PDF, then upload it here.
               </p>
             </div>
           </div>

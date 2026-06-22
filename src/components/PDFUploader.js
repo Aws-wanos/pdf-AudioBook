@@ -1,78 +1,73 @@
 import React, { useState, useRef } from "react";
-import pdfParse from "pdf-parse";
 
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
-  const [progress, setProgress] = useState(0);
   const fileInputRef = useRef(null);
 
-  const extractTextFromPDF = async (file) => {
+  const extractTextFromPDF = (file) => {
     setIsLoading(true);
     setError(null);
     setFileName(file.name);
-    setProgress(10);
 
-    try {
-      // ====== READ AS ARRAYBUFFER ======
-      const arrayBuffer = await file.arrayBuffer();
-      setProgress(30);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const cleanText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+        const matches = cleanText.match(/\(([^)]*)\)/g);
+        let extractedText = matches
+          ? matches.map((m) => m.slice(1, -1)).join(" ")
+          : "";
 
-      // ====== USE PDF-PARSE ======
-      const data = await pdfParse(arrayBuffer);
-      setProgress(80);
+        if (!extractedText || extractedText.length < 20) {
+          const readable = cleanText.match(/[A-Za-z]{4,}/g);
+          if (readable) extractedText = readable.join(" ");
+        }
 
-      const extractedText = data.text;
-
-      if (!extractedText || extractedText.trim().length < 20) {
-        throw new Error("No text could be extracted from this PDF.");
+        if (extractedText && extractedText.length > 20) {
+          onTextExtracted(extractedText);
+          onFileUpload(file);
+        } else {
+          setError(
+            "⚠️ This PDF appears to be scanned or image-based.\n\nPlease use the OCR Converter first:\nhttp://89.125.77.85/ocr",
+          );
+        }
+      } catch (err) {
+        setError("Failed to extract text: " + err.message);
+      } finally {
+        setIsLoading(false);
       }
-
-      setProgress(100);
-      console.log("✅ Text extracted:", extractedText.length, "characters");
-
-      onTextExtracted(extractedText);
-      onFileUpload(file);
-    } catch (err) {
-      console.error("❌ Error:", err);
-      setError("Failed to extract text: " + err.message);
-    } finally {
+    };
+    reader.onerror = () => {
+      setError("Failed to read file");
       setIsLoading(false);
-    }
+    };
+    reader.readAsText(file);
   };
 
-  const handleFileChange = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf")
-    ) {
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === "application/pdf") {
       extractTextFromPDF(file);
     } else {
-      setError("Please upload a valid PDF file");
+      setError("Please upload a PDF file");
     }
   };
 
-  const handleDrop = (event) => {
-    event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
-
-    if (
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf")
-    ) {
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === "application/pdf") {
       extractTextFromPDF(file);
     } else {
-      setError("Please upload a valid PDF file");
+      setError("Please upload a PDF file");
     }
   };
 
-  const handleDragOver = (event) => {
-    event.preventDefault();
+  const handleDragOver = (e) => {
+    e.preventDefault();
   };
 
   return (
@@ -80,11 +75,21 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       <h3 className="font-semibold text-gray-700 mb-3">📄 Upload PDF</h3>
 
       {error && (
-        <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded mb-4">
-          <strong>Error:</strong> {error}
+        <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-2 rounded mb-4 whitespace-pre-wrap">
+          {error}
+          {error.includes("OCR Converter") && (
+            <a
+              href="http://89.125.77.85/ocr"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block mt-2 text-blue-500 underline"
+            >
+              🔗 Open OCR Converter
+            </a>
+          )}
           <button
             onClick={() => setError(null)}
-            className="ml-2 text-sm underline"
+            className="block mt-2 text-sm underline"
           >
             Dismiss
           </button>
@@ -95,13 +100,9 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
         <div className="mb-4">
           <div className="flex justify-between text-sm text-gray-500 mb-1">
             <span>Extracting text...</span>
-            <span>{progress}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2.5">
-            <div
-              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            ></div>
+            <div className="bg-blue-600 h-2.5 rounded-full animate-pulse"></div>
           </div>
         </div>
       )}
@@ -148,7 +149,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
               Drag & drop your PDF here, or click to browse
             </p>
             <p className="text-sm text-gray-400">
-              Extracts text from text-based PDFs
+              For scanned PDFs, use the OCR Converter
             </p>
           </>
         )}
