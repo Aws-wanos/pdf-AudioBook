@@ -2,9 +2,10 @@ import React, { useState, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import Tesseract from "tesseract.js";
 
-// ====== PDF.js Worker ======
+// ====== FIX: Use version 3.11.174 worker ======
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
+console.log("📄 PDF.js version:", pdfjsLib.version);
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -12,6 +13,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const [isOcrMode, setIsOcrMode] = useState(false);
   const fileInputRef = useRef(null);
 
   const extractTextFromPDF = async (file) => {
@@ -21,6 +23,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
     setProgress(0);
     setCurrentPage(0);
     setTotalPages(0);
+    setIsOcrMode(false);
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -32,7 +35,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       setProgress(10);
 
       let fullText = "";
-      let ocrCount = 0;
+      let ocrCount = 0; // ← DECLARE HERE
 
       for (let i = 1; i <= totalPages; i++) {
         setCurrentPage(i);
@@ -48,6 +51,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
         } else {
           // ====== OCR FOR IMAGES ======
           console.log(`🖼️ Page ${i}: Running OCR...`);
+          setIsOcrMode(true);
           ocrCount++;
 
           const viewport = page.getViewport({ scale: 1.5 });
@@ -59,7 +63,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           await page.render({ canvasContext: context, viewport }).promise;
           const imageData = canvas.toDataURL("image/png");
 
-          // ====== TESSERACT OCR WITH PROPER CONFIG ======
+          // ====== TESSERACT OCR ======
           const result = await Tesseract.recognize(imageData, "eng", {
             logger: (m) => {
               if (m.status === "recognizing text") {
@@ -68,10 +72,6 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
                 setProgress(Math.round(10 + pageProgress + chunkProgress));
               }
             },
-            // ====== DISABLE SOME FEATURES FOR SPEED ======
-            disable: true,
-            // ====== USE ONLY ENGLISH FOR SPEED ======
-            lang: "eng",
           });
 
           const ocrText = result.data.text || "";
@@ -100,6 +100,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       setError("Failed to extract text: " + err.message);
     } finally {
       setIsLoading(false);
+      setIsOcrMode(false);
     }
   };
 
@@ -156,7 +157,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
         <div className="mb-4">
           <div className="flex justify-between text-sm text-gray-500 mb-1">
             <span>
-              {ocrCount > 0
+              {isOcrMode
                 ? `🔍 OCR Page ${currentPage}/${totalPages}`
                 : `📄 Extracting page ${currentPage}/${totalPages}`}
             </span>
@@ -168,6 +169,11 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
               style={{ width: `${progress}%` }}
             ></div>
           </div>
+          {isOcrMode && (
+            <p className="text-xs text-yellow-500 mt-1">
+              ⚠️ OCR mode: Processing image-based page {currentPage}
+            </p>
+          )}
         </div>
       )}
 
@@ -193,7 +199,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           <div className="py-4">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
             <p className="mt-2 text-gray-500">
-              {ocrCount > 0 ? "Running OCR..." : "Extracting text..."}
+              {isOcrMode ? "Running OCR..." : "Extracting text..."}
             </p>
           </div>
         ) : (
