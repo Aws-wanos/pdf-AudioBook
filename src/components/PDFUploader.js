@@ -1,67 +1,38 @@
 import React, { useState, useRef } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-
-// ====== PDF.js Worker ======
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+import pdfParse from "pdf-parse";
 
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
   const fileInputRef = useRef(null);
 
   const extractTextFromPDF = async (file) => {
     setIsLoading(true);
     setError(null);
     setFileName(file.name);
-    setProgress(0);
-    setCurrentPage(0);
-    setTotalPages(0);
+    setProgress(10);
 
     try {
-      // ====== READ AS ARRAYBUFFER (NOT TEXT!) ======
+      // ====== READ AS ARRAYBUFFER ======
       const arrayBuffer = await file.arrayBuffer();
-      setProgress(10);
+      setProgress(30);
 
-      // ====== LOAD PDF ======
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const totalPages = pdf.numPages;
-      setTotalPages(totalPages);
-      setProgress(20);
+      // ====== USE PDF-PARSE ======
+      const data = await pdfParse(arrayBuffer);
+      setProgress(80);
 
-      let fullText = "";
+      const extractedText = data.text;
 
-      for (let i = 1; i <= totalPages; i++) {
-        setCurrentPage(i);
-        const page = await pdf.getPage(i);
-
-        // ====== EXTRACT TEXT ======
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item) => item.str).join(" ");
-
-        if (pageText.trim().length > 0) {
-          fullText += `--- Page ${i} ---\n${pageText}\n\n`;
-        }
-
-        setProgress(20 + (i / totalPages) * 70);
-        console.log(`📄 Page ${i}: ${pageText.length} chars`);
-      }
-
-      if (!fullText || fullText.trim().length < 20) {
-        throw new Error(
-          "No text could be extracted. This may be a scanned PDF. Use the OCR Converter.",
-        );
+      if (!extractedText || extractedText.trim().length < 20) {
+        throw new Error("No text could be extracted from this PDF.");
       }
 
       setProgress(100);
-      console.log(
-        `✅ Extracted ${fullText.length} chars from ${totalPages} pages`,
-      );
+      console.log("✅ Text extracted:", extractedText.length, "characters");
 
-      onTextExtracted(fullText);
+      onTextExtracted(extractedText);
       onFileUpload(file);
     } catch (err) {
       console.error("❌ Error:", err);
@@ -123,12 +94,8 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
       {isLoading && (
         <div className="mb-4">
           <div className="flex justify-between text-sm text-gray-500 mb-1">
-            <span>
-              {totalPages > 0
-                ? `📄 Page ${currentPage}/${totalPages}`
-                : "Extracting text..."}
-            </span>
-            <span>{Math.round(progress)}%</span>
+            <span>Extracting text...</span>
+            <span>{progress}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2.5">
             <div
