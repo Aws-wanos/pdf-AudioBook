@@ -1,19 +1,53 @@
 import React, { useState, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import Tesseract from "tesseract.js";
 
-// ====== FIX: Use version 3.11.174 worker ======
+// ====== PDF.js Worker ======
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
-console.log("📄 PDF.js version:", pdfjsLib.version);
+// ====== TESSERACT CDN LOADER ======
+let Tesseract = null;
+let tesseraLoaded = false;
+
+const loadTesseract = () => {
+  return new Promise((resolve, reject) => {
+    if (tesseraLoaded && Tesseract) {
+      resolve(Tesseract);
+      return;
+    }
+
+    // Try to use window.Tesseract if already loaded
+    if (window.Tesseract) {
+      Tesseract = window.Tesseract;
+      tesseraLoaded = true;
+      resolve(Tesseract);
+      return;
+    }
+
+    // Load from CDN
+    const script = document.createElement("script");
+    script.src =
+      "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    script.async = true;
+    script.onload = () => {
+      Tesseract = window.Tesseract;
+      tesseraLoaded = true;
+      resolve(Tesseract);
+    };
+    script.onerror = () => {
+      reject(new Error("Failed to load Tesseract.js"));
+    };
+    document.head.appendChild(script);
+  });
+};
+
 const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [isOcrMode, setIsOcrMode] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [isOcrMode, setIsOcrMode] = useState(false);
   const fileInputRef = useRef(null);
 
   const extractTextFromPDF = async (file) => {
@@ -21,27 +55,29 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
     setError(null);
     setFileName(file.name);
     setProgress(0);
+    setIsOcrMode(false);
     setCurrentPage(0);
     setTotalPages(0);
-    setIsOcrMode(false);
 
     try {
+      // ====== LOAD TESSERACT FIRST ======
+      await loadTesseract();
+
       const arrayBuffer = await file.arrayBuffer();
-      setProgress(5);
+      setProgress(10);
 
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const totalPages = pdf.numPages;
       setTotalPages(totalPages);
-      setProgress(10);
+      setProgress(20);
 
       let fullText = "";
-      let ocrCount = 0; // ← DECLARE HERE
+      let ocrCount = 0;
 
       for (let i = 1; i <= totalPages; i++) {
         setCurrentPage(i);
         const page = await pdf.getPage(i);
 
-        // ====== TRY DIRECT TEXT FIRST ======
         const textContent = await page.getTextContent();
         const pageText = textContent.items.map((item) => item.str).join(" ");
 
@@ -49,7 +85,6 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           fullText += `--- Page ${i} ---\n${pageText}\n\n`;
           console.log(`📄 Page ${i}: Direct text (${pageText.length} chars)`);
         } else {
-          // ====== OCR FOR IMAGES ======
           console.log(`🖼️ Page ${i}: Running OCR...`);
           setIsOcrMode(true);
           ocrCount++;
@@ -63,13 +98,15 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           await page.render({ canvasContext: context, viewport }).promise;
           const imageData = canvas.toDataURL("image/png");
 
-          // ====== TESSERACT OCR ======
+          // ====== USE TESSERACT ======
           const result = await Tesseract.recognize(imageData, "eng", {
             logger: (m) => {
               if (m.status === "recognizing text") {
                 const pageProgress = ((i - 1) / totalPages) * 100;
                 const chunkProgress = (m.progress * 100) / totalPages;
-                setProgress(Math.round(10 + pageProgress + chunkProgress));
+                setProgress(
+                  Math.round(20 + pageProgress + chunkProgress * 0.6),
+                );
               }
             },
           });
@@ -81,7 +118,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           console.log(`✅ Page ${i}: OCR completed (${ocrText.length} chars)`);
         }
 
-        setProgress(10 + (i / totalPages) * 85);
+        setProgress(20 + (i / totalPages) * 70);
       }
 
       if (!fullText || fullText.trim().length < 20) {
@@ -90,7 +127,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
 
       setProgress(100);
       console.log(
-        `✅ Extracted ${fullText.length} chars (${ocrCount} OCR pages)`,
+        `✅ Extracted ${fullText.length} chars, ${ocrCount} OCR pages`,
       );
 
       onTextExtracted(fullText);
@@ -171,7 +208,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
           </div>
           {isOcrMode && (
             <p className="text-xs text-yellow-500 mt-1">
-              ⚠️ OCR mode: Processing image-based page {currentPage}
+              ⚠️ OCR mode: Processing page {currentPage}
             </p>
           )}
         </div>
@@ -221,7 +258,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
               Drag & drop your PDF here, or click to browse
             </p>
             <p className="text-sm text-gray-400">
-              Supports text PDFs + scanned PDFs (OCR)
+              Supports text + scanned PDFs (OCR)
             </p>
           </>
         )}
