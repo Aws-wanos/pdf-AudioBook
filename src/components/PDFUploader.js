@@ -25,6 +25,7 @@ const PDFUploader = ({ onFileUpload, onTextExtracted }) => {
     setTotalPages(0);
 
     try {
+      // ====== READ AS ARRAYBUFFER (NOT TEXT!) ======
       const arrayBuffer = await file.arrayBuffer();
       setProgress(10);
 
